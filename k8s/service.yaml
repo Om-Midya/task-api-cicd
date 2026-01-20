@@ -1,0 +1,29 @@
+# =============================================================================
+# Kubernetes Service
+# =============================================================================
+# A Service provides a stable way to access your pods:
+# - Pods can come and go (scaling, crashes, updates)
+# - Service provides a consistent IP/DNS name
+# - Load balances traffic across all healthy pods
+#
+# Types of Services:
+# - ClusterIP: Internal only (default)
+# - NodePort: Exposes on a port on each node (30000-32767)
+# - LoadBalancer: Creates external load balancer (cloud providers)
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-api-service            # Name of this service
+  labels:
+    app: task-api
+spec:
+  type: NodePort                    # Expose outside the cluster
+  selector:
+    app: task-api                   # Route traffic to pods with this label
+  ports:
+    - protocol: TCP
+      port: 80                      # Service port (what you connect to)
+      targetPort: 3000              # Pod port (where app listens)
+      nodePort: 30080               # External port (access via localhost:30080)

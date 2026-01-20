@@ -11,6 +11,7 @@ This project demonstrates a production-grade CI/CD pipeline with:
 - **Security Scanning** - SAST (CodeQL), SCA (npm audit), Container scanning (Trivy)
 - **Containerization** - Docker multi-stage builds
 - **Registry Publishing** - Automated push to DockerHub
+- **Continuous Deployment** - Kubernetes deployment with CD pipeline
 
 ## Tech Stack
 
@@ -144,13 +145,49 @@ Configure the following secrets in your GitHub repository (Settings > Secrets > 
 4. Give it a name (e.g., "GitHub Actions")
 5. Copy the token and add it as `DOCKERHUB_TOKEN` secret in GitHub
 
+## Kubernetes Deployment
+
+### Prerequisites
+
+- Docker Desktop with Kubernetes enabled (kind cluster)
+- kubectl CLI
+
+### Deploy to Local Kubernetes
+
+```bash
+# Apply Kubernetes manifests
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+
+# Check deployment status
+kubectl get pods
+kubectl get services
+
+# Access the application
+kubectl port-forward svc/task-api-service 8080:80
+
+# Test the deployment
+curl http://localhost:8080/health
+```
+
+### CD Pipeline
+
+The CD pipeline (`.github/workflows/cd.yml`) is triggered automatically after CI passes. It:
+1. Validates Kubernetes manifests
+2. Provides deployment artifacts
+3. Includes DAST scan placeholder
+
 ## Project Structure
 
 ```
 project-root/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml          # CI pipeline
+│       ├── ci.yml          # CI pipeline
+│       └── cd.yml          # CD pipeline
+├── k8s/
+│   ├── deployment.yaml     # Kubernetes Deployment
+│   └── service.yaml        # Kubernetes Service
 ├── src/
 │   ├── index.ts            # Entry point
 │   ├── app.ts              # Express app

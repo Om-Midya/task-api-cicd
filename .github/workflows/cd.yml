@@ -1,0 +1,222 @@
+# =============================================================================
+# CD Pipeline - Continuous Deployment
+# =============================================================================
+# This workflow deploys the application to Kubernetes after CI passes.
+#
+# STAGES:
+# 1. Pull image from DockerHub
+# 2. Update Kubernetes deployment
+# 3. Wait for rollout
+# 4. Verify deployment health
+# 5. (Optional) Run DAST scan
+#
+# NOTE: This pipeline is designed for LOCAL Kubernetes (Docker Desktop).
+# For production, you would configure kubectl to connect to your cloud cluster.
+# =============================================================================
+
+name: CD Pipeline
+
+# =============================================================================
+# TRIGGERS
+# =============================================================================
+on:
+  # Trigger after CI pipeline completes successfully
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+      - master
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy (default: latest)'
+        required: false
+        default: 'latest'
+
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/task-api
+
+# =============================================================================
+# JOBS
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB: Deploy to Kubernetes
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    # Only run if CI was successful (or manual trigger)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # STAGE 1: Checkout code
+      # Purpose: Get the Kubernetes manifests
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # STAGE 2: Set image tag
+      # Purpose: Determine which image version to deploy
+      # -----------------------------------------------------------------------
+      - name: Set image tag
+        id: image
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.image_tag || 'latest' }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          fi
+          echo "Deploying image: ${{ env.DOCKER_IMAGE }}:${{ steps.image.outputs.tag || 'latest' }}"
+
+      # -----------------------------------------------------------------------
+      # STAGE 3: Update deployment manifest with correct image
+      # Purpose: Replace placeholder with actual DockerHub image
+      # -----------------------------------------------------------------------
+      - name: Update deployment manifest
+        run: |
+          sed -i "s|DOCKERHUB_USERNAME/task-api:latest|${{ env.DOCKER_IMAGE }}:${{ steps.image.outputs.tag || 'latest' }}|g" k8s/deployment.yaml
+          echo "Updated deployment.yaml:"
+          cat k8s/deployment.yaml
+
+      # -----------------------------------------------------------------------
+      # STAGE 4: Setup kubectl (for cloud deployment)
+      # Purpose: Configure kubectl to connect to Kubernetes cluster
+      # NOTE: For local Docker Desktop, you would run kubectl locally instead
+      # -----------------------------------------------------------------------
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      # -----------------------------------------------------------------------
+      # For GitHub Actions to deploy to a real cluster, you need to configure
+      # cluster access. This example shows the pattern - you would add your
+      # cluster's kubeconfig as a secret.
+      # -----------------------------------------------------------------------
+      # - name: Configure kubectl
+      #   run: |
+      #     echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
+      #     export KUBECONFIG=kubeconfig
+
+      # -----------------------------------------------------------------------
+      # STAGE 5: Display deployment info (simulation for local cluster)
+      # Purpose: Show what would be deployed
+      # -----------------------------------------------------------------------
+      - name: Display deployment configuration
+        run: |
+          echo "============================================="
+          echo "DEPLOYMENT CONFIGURATION"
+          echo "============================================="
+          echo "Image: ${{ env.DOCKER_IMAGE }}:${{ steps.image.outputs.tag || 'latest' }}"
+          echo ""
+          echo "Deployment manifest:"
+          echo "---------------------------------------------"
+          cat k8s/deployment.yaml
+          echo ""
+          echo "---------------------------------------------"
+          echo "Service manifest:"
+          echo "---------------------------------------------"
+          cat k8s/service.yaml
+          echo "============================================="
+
+      # -----------------------------------------------------------------------
+      # STAGE 6: Validate Kubernetes manifests
+      # Purpose: Check YAML syntax before applying
+      # -----------------------------------------------------------------------
+      - name: Validate Kubernetes manifests
+        run: |
+          echo "Validating Kubernetes manifests..."
+          kubectl apply --dry-run=client -f k8s/deployment.yaml
+          kubectl apply --dry-run=client -f k8s/service.yaml
+          echo "✅ Manifests are valid!"
+
+      # -----------------------------------------------------------------------
+      # STAGE 7: Upload manifests as artifacts
+      # Purpose: Make manifests available for manual deployment
+      # -----------------------------------------------------------------------
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-manifests
+          path: k8s/
+
+      # -----------------------------------------------------------------------
+      # STAGE 8: Deployment instructions
+      # Purpose: Provide instructions for local deployment
+      # -----------------------------------------------------------------------
+      - name: Deployment instructions
+        run: |
+          echo "============================================="
+          echo "LOCAL DEPLOYMENT INSTRUCTIONS"
+          echo "============================================="
+          echo ""
+          echo "To deploy to your local Kubernetes cluster:"
+          echo ""
+          echo "1. Download the artifacts from this workflow run"
+          echo "2. Or run these commands locally:"
+          echo ""
+          echo "   kubectl apply -f k8s/deployment.yaml"
+          echo "   kubectl apply -f k8s/service.yaml"
+          echo ""
+          echo "3. Check deployment status:"
+          echo "   kubectl get pods"
+          echo "   kubectl get services"
+          echo ""
+          echo "4. Access the application:"
+          echo "   curl http://localhost:30080/health"
+          echo ""
+          echo "============================================="
+
+  # ---------------------------------------------------------------------------
+  # JOB: DAST Scan (Dynamic Application Security Testing)
+  # ---------------------------------------------------------------------------
+  # DAST scans the RUNNING application for security vulnerabilities
+  # Unlike SAST (which scans code), DAST tests the deployed application
+  # ---------------------------------------------------------------------------
+  dast-scan:
+    name: DAST Security Scan
+    runs-on: ubuntu-latest
+    needs: deploy
+    # Only run on manual trigger for now (requires running application)
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: DAST Scan Placeholder
+        run: |
+          echo "============================================="
+          echo "DAST (Dynamic Application Security Testing)"
+          echo "============================================="
+          echo ""
+          echo "DAST would scan the running application for:"
+          echo "- SQL Injection vulnerabilities"
+          echo "- Cross-Site Scripting (XSS)"
+          echo "- Security misconfigurations"
+          echo "- Authentication issues"
+          echo ""
+          echo "Common DAST tools:"
+          echo "- OWASP ZAP (Zed Attack Proxy)"
+          echo "- Burp Suite"
+          echo "- Nikto"
+          echo ""
+          echo "For a real DAST scan, you would:"
+          echo "1. Deploy the application to a test environment"
+          echo "2. Run OWASP ZAP against the deployed URL"
+          echo "3. Review and address findings"
+          echo ""
+          echo "Example ZAP command:"
+          echo "  docker run -t owasp/zap2docker-stable zap-baseline.py \\"
+          echo "    -t http://your-app-url/health"
+          echo "============================================="

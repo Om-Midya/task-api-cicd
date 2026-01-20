@@ -1,0 +1,70 @@
+# =============================================================================
+# Kubernetes Deployment
+# =============================================================================
+# A Deployment tells Kubernetes HOW to run your application:
+# - Which Docker image to use
+# - How many copies (replicas) to run
+# - Resource limits (CPU, memory)
+# - Health checks
+#
+# Kubernetes will ensure these pods are always running. If one crashes,
+# it automatically creates a new one.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-api                    # Name of this deployment
+  labels:
+    app: task-api                   # Labels for organizing resources
+spec:
+  replicas: 2                       # Run 2 copies for high availability
+  selector:
+    matchLabels:
+      app: task-api                 # How to find pods belonging to this deployment
+  template:
+    metadata:
+      labels:
+        app: task-api               # Label applied to each pod
+    spec:
+      containers:
+        - name: task-api
+          image: om7521/task-api:latest  # Your DockerHub image
+          ports:
+            - containerPort: 3000   # Port the app listens on
+
+          # Environment variables
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+
+          # Resource limits - prevent runaway containers
+          resources:
+            requests:
+              memory: "128Mi"       # Minimum memory
+              cpu: "100m"           # Minimum CPU (100 millicores = 0.1 CPU)
+            limits:
+              memory: "256Mi"       # Maximum memory
+              cpu: "500m"           # Maximum CPU (500 millicores = 0.5 CPU)
+
+          # Liveness probe - Is the container alive?
+          # If this fails, Kubernetes restarts the container
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10  # Wait 10s before first check
+            periodSeconds: 10        # Check every 10s
+            failureThreshold: 3      # Restart after 3 failures
+
+          # Readiness probe - Is the container ready to receive traffic?
+          # If this fails, Kubernetes stops sending traffic to this pod
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5   # Wait 5s before first check
+            periodSeconds: 5         # Check every 5s
+            failureThreshold: 3      # Mark unready after 3 failures
