@@ -19,11 +19,10 @@ metadata:
   labels:
     app: task-api
 spec:
-  type: NodePort                    # Expose outside the cluster
+  type: LoadBalancer                # Creates external load balancer (for cloud)
   selector:
     app: task-api                   # Route traffic to pods with this label
   ports:
     - protocol: TCP
       port: 80                      # Service port (what you connect to)
       targetPort: 3000              # Pod port (where app listens)
-      nodePort: 30080               # External port (access via localhost:30080)

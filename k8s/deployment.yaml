@@ -18,7 +18,7 @@ metadata:
   labels:
     app: task-api                   # Labels for organizing resources
 spec:
-  replicas: 2                       # Run 2 copies for high availability
+  replicas: 1                       # Single replica for demo (use 2+ for production)
   selector:
     matchLabels:
       app: task-api                 # How to find pods belonging to this deployment
@@ -40,14 +40,14 @@ spec:
             - name: PORT
               value: "3000"
 
-          # Resource limits - prevent runaway containers
+          # Resource limits - GKE Autopilot requires minimum 250m CPU
           resources:
             requests:
-              memory: "128Mi"       # Minimum memory
-              cpu: "100m"           # Minimum CPU (100 millicores = 0.1 CPU)
+              memory: "256Mi"       # Minimum memory
+              cpu: "250m"           # Minimum CPU for GKE Autopilot
             limits:
-              memory: "256Mi"       # Maximum memory
-              cpu: "500m"           # Maximum CPU (500 millicores = 0.5 CPU)
+              memory: "512Mi"       # Maximum memory
+              cpu: "500m"           # Maximum CPU
 
           # Liveness probe - Is the container alive?
           # If this fails, Kubernetes restarts the container
