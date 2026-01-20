@@ -1,0 +1,43 @@
+# .dockerignore
+# Files and folders to exclude from Docker build context
+# This makes builds faster and images smaller
+
+# Dependencies (will be installed fresh in container)
+node_modules
+
+# Build output (will be created in container)
+dist
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Tests (not needed in production)
+tests
+*.test.ts
+jest.config.js
+coverage
+
+# Development files
+*.md
+.eslintrc.json
+
+# Docker files
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# GitHub Actions (not needed in container)
+.github
+
+# Environment files (secrets should never be in images!)
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db

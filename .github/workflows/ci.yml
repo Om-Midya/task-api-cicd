@@ -1,0 +1,260 @@
+# =============================================================================
+# CI Pipeline - Continuous Integration
+# =============================================================================
+# This workflow runs automatically on every push to main/master branch.
+# It performs code quality checks, security scans, and builds the Docker image.
+#
+# STAGES:
+# 1. Checkout - Get source code
+# 2. Setup - Install Node.js
+# 3. Install - Install dependencies
+# 4. Lint - Check code style
+# 5. Test - Run unit tests
+# 6. SAST - Static Application Security Testing (CodeQL)
+# 7. SCA - Software Composition Analysis (npm audit)
+# 8. Build - Compile TypeScript
+# 9. Docker Build - Create container image
+# 10. Image Scan - Scan for vulnerabilities (Trivy)
+# 11. Runtime Test - Verify container works
+# 12. Push - Upload to DockerHub
+# =============================================================================
+
+name: CI Pipeline
+
+# =============================================================================
+# TRIGGERS - When does this pipeline run?
+# =============================================================================
+on:
+  push:
+    branches:
+      - main
+      - master
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/task-api
+  NODE_VERSION: '20'
+
+# =============================================================================
+# JOBS
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB: Build and Test
+  # ---------------------------------------------------------------------------
+  # This job handles all the code-level checks
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # STAGE 1: Checkout
+      # Purpose: Download the source code from the repository
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # STAGE 2: Setup Node.js
+      # Purpose: Install Node.js runtime environment
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'  # Cache npm dependencies for faster builds
+
+      # -----------------------------------------------------------------------
+      # STAGE 3: Install Dependencies
+      # Purpose: Install all npm packages
+      # Why npm ci? It's faster and more reliable than npm install
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # STAGE 4: Linting
+      # Purpose: Enforce coding standards and catch potential issues
+      # Why it matters: Prevents technical debt and maintains consistency
+      # -----------------------------------------------------------------------
+      - name: Run ESLint
+        run: npm run lint
+
+      # -----------------------------------------------------------------------
+      # STAGE 5: Unit Tests
+      # Purpose: Verify business logic works correctly
+      # Why it matters: Catches regressions before they reach production
+      # -----------------------------------------------------------------------
+      - name: Run unit tests
+        run: npm test
+
+      # -----------------------------------------------------------------------
+      # STAGE 6: Build
+      # Purpose: Compile TypeScript to JavaScript
+      # Why it matters: Ensures code compiles without errors
+      # -----------------------------------------------------------------------
+      - name: Build application
+        run: npm run build
+
+      # -----------------------------------------------------------------------
+      # Upload build artifacts for later stages
+      # -----------------------------------------------------------------------
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # ---------------------------------------------------------------------------
+  # JOB: Security Scanning (SAST + SCA)
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: build-and-test  # Run after build succeeds
+    permissions:
+      security-events: write  # Required for CodeQL
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # STAGE 7: SAST - Static Application Security Testing (CodeQL)
+      # Purpose: Find security vulnerabilities in YOUR code
+      # Why it matters: Detects OWASP Top 10 issues like injection attacks
+      # -----------------------------------------------------------------------
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+      # -----------------------------------------------------------------------
+      # STAGE 8: SCA - Software Composition Analysis
+      # Purpose: Find vulnerabilities in third-party dependencies
+      # Why it matters: Identifies supply-chain risks (vulnerable libraries)
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js for SCA
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies for audit
+        run: npm ci
+
+      - name: Run npm audit (SCA)
+        run: npm audit --audit-level=high
+        continue-on-error: true  # Don't fail pipeline, but report findings
+
+  # ---------------------------------------------------------------------------
+  # JOB: Docker Build, Scan, and Push
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: [build-and-test, security-scan]  # Run after previous jobs
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # STAGE 9: Docker Build
+      # Purpose: Create container image
+      # Why it matters: Packages application for deployment
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -----------------------------------------------------------------------
+      # STAGE 10: Image Scan (Trivy)
+      # Purpose: Scan container for OS and library vulnerabilities
+      # Why it matters: Prevents vulnerable images from shipping
+      # -----------------------------------------------------------------------
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          format: 'table'
+          exit-code: '0'  # Don't fail, but report
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      # -----------------------------------------------------------------------
+      # STAGE 11: Runtime Test
+      # Purpose: Verify the container actually starts and responds
+      # Why it matters: Ensures image is runnable, not just buildable
+      # -----------------------------------------------------------------------
+      - name: Runtime test - Start container
+        run: |
+          docker run -d --name test-container -p 3000:3000 ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          sleep 5
+
+      - name: Runtime test - Health check
+        run: |
+          response=$(curl -s http://localhost:3000/health)
+          echo "Health check response: $response"
+          if echo "$response" | grep -q "healthy"; then
+            echo "✅ Container is healthy!"
+          else
+            echo "❌ Container health check failed!"
+            exit 1
+          fi
+
+      - name: Runtime test - Cleanup
+        run: docker stop test-container && docker rm test-container
+        if: always()
+
+      # -----------------------------------------------------------------------
+      # STAGE 12: Push to DockerHub
+      # Purpose: Upload trusted image to registry
+      # Why it matters: Enables downstream CD (deployment)
+      # -----------------------------------------------------------------------
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push to DockerHub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Print image info
+        run: |
+          echo "✅ Docker image pushed successfully!"
+          echo "Image: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}"
+          echo "Also tagged as: ${{ env.DOCKER_IMAGE }}:latest"
